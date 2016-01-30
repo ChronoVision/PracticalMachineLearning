@@ -1,0 +1,127 @@
+---
+title: 'Practical Machine Learning: course project'
+author: "Maarten Elen"
+date: "30 Jan 2016"
+output: html_document
+---
+
+```{r message=FALSE}
+setwd( "/Users/maartenelen/Documents/Modeling/Johns Hopkins Coursera/course 8")
+set.seed(123456)
+library("dplyr")
+library("caret")
+testing_pml <- read.csv("~/Documents/Modeling/Johns Hopkins Coursera/course 8/pml-testing.csv")
+training_pml <- read.csv("~/Documents/Modeling/Johns Hopkins Coursera/course 8/pml-training.csv")
+```
+
+First, let's set aside some data to be able to estimate our out-of-sample error, when building our model. We'll use the dataset "training" to build our model and the dataset "CV" to test our out-of-sample error.
+
+```{r}
+in_train <- createDataPartition(training_pml$classe, p=0.7, list=FALSE)
+training <- training_pml[in_train, ]
+CV <- training_pml[-in_train, ]
+```
+
+***EXPLORATORY ANALYSIS***
+  
+Now, let's do some exploratory analysis. First let's have a look at which variables relate most strongly to our class variable. In fact, it looks like the timestamps are the most important predictors of class.
+It appears that respondents where asked to sequentially do the exercise in different ways. This means that if we know the timestamp and who did the exercise, we can find out how they did the exercise. This is not a very useful approach for future applications, but since the goal of the assignment is to "predict the manner in which they did the exercise" by using "any of the other variables to predict with", let's see what we get!
+
+```{r}
+usernames <- levels(training$user_name)
+
+par(mfrow=c(2,3))
+for (i in 1:length(usernames)) {
+      x <- training[training$user_name == usernames[i],]
+      plot(x$raw_timestamp_part_1, 
+           x$classe, 
+           col=x$classe, 
+           xlab="Time", 
+           ylab="Class", 
+           main=usernames[i])
+}
+```
+
+***MODEL TESTING***
+
+*MODEL 1*    
+
+Let's train a decision tree model with time and user as predictors of class. Let's train it on our training set and then test our accuracy on the CV set. 
+
+```{r}
+fit1 <- train(classe~raw_timestamp_part_1+user_name, method="rpart", data=training)
+predictions <- predict(fit1, CV)
+confusionMatrix(predictions, CV$classe)
+```
+
+This gives us a model with 99% accuracy!
+  
+*MODEL 2*  
+  
+Since the above model isn't very useful for future applications, let's also take a look at some other models, without making use of the timestamps. First let's filter out variables with missing values (e.g. the calculated variables). Let's also filter out the timestamp data and identifier variables. Let's only have a look at the sensor data this time.
+
+```{r}
+filter <- apply(training, 2, function(x) {sum(is.na(x) | x == "")})
+filter <- ifelse(filter == 0, TRUE, FALSE)
+filter[[1]] <- FALSE
+filter[[2]] <- FALSE
+filter[[3]] <- FALSE
+filter[[4]] <- FALSE
+filter[[5]] <- FALSE
+filter[[6]] <- FALSE
+filter[[7]] <- FALSE
+
+ncol <- ncol(training[,filter])
+````
+
+This leaves us with 53 features. Let's build a decision tree with all these features and test our accuracy on our CV set.
+
+```{r}
+fit2 <- train(classe~., method="rpart", data=training[,filter])
+predictions <- predict(fit2, CV)
+confusionMatrix(predictions, CV$classe)
+````
+
+This gives us an accuracy of slightly below 50%. Our model doesn't really prove to be able to predict the B and D classes. Let's have a look at what variables are most important in predicting class.
+
+```{r}
+varImp(fit2)
+````
+
+*MODEL 3*  
+
+Let's build another model with only the 4 most important variables
+
+```{r}
+fit3 <- train(classe~pitch_forearm+roll_forearm+roll_belt+magnet_dumbbell_y, method="rpart", data=training[,filter])
+predictions <- predict(fit3, CV)
+confusionMatrix(predictions, CV$classe)
+````
+
+Seems like our accuracy hasn't gone down, with this simplified model, so we'll take this as our new model. 
+
+*MODEL 4*  
+
+Let's if we can improve our accuracy with a random forest.
+
+```{r}
+fit4 <- train(classe~pitch_forearm+roll_forearm+roll_belt+magnet_dumbbell_y, method="rf", data=training[,filter])
+predictions <- predict(fit4, CV)
+confusionMatrix(predictions, CV$classe)
+````
+
+Our random forest seems to be much more capable in predicting all classes - even the B and D classes. Its accuracy is about 91% - not as good as our timestamp model, but much more useful!   
+
+***PREDICTIONS***
+  
+Let's predict the test cases with two of our models: model 1 and model 4.
+
+```{r}
+predictions_fit1 <- predict(fit1, testing_pml)
+predictions_fit4 <- predict(fit4, testing_pml)
+confusionMatrix(predictions_fit1, predictions_fit4)
+````
+
+Seems like both models agree in 85% of the cases. However, for future applications, only model 5 is useful.  
+  
+  
